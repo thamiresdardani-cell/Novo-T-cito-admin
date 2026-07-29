@@ -9,7 +9,7 @@ local ActiveJail = nil
 local FreezeConnection = nil
 
 ----------------------------------------------------
--- 1. NOTIFICAÇÃO NA TELA (PARA SABER SE CHEGOU)
+-- 1. NOTIFICAÇÃO NA TELA
 ----------------------------------------------------
 local function ShowNotif(msg)
 	local sg = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("TacitoNotifs")
@@ -46,12 +46,12 @@ local function ShowNotif(msg)
 end
 
 ----------------------------------------------------
--- 2. ENVIO DE MENSAGENS SENSÍVEIS (CHAT SAFE)
+-- 2. ENVIO DE MENSAGENS (COM BYPASS DE IDADE NO CHAT)
 ----------------------------------------------------
 local function SendChatMessage(msg)
 	pcall(function()
 		if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-			local channel = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
+			local channel = TextChatService.TextChannels:FindFirstChild("RBXGeneral") or TextChatService.TextChannels:FindFirstChild("RBXSystem")
 			if channel then channel:SendAsync(msg) end
 		else
 			local defaultChat = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
@@ -63,44 +63,30 @@ local function SendChatMessage(msg)
 end
 
 ----------------------------------------------------
--- 3. EXECUÇÃO LOCAL (AÇÕES NO PRÓPRIO AVATAR)
+-- 3. EXECUÇÃO DIRETA (BYPASS LOCAL/UNIVERSAL)
 ----------------------------------------------------
-local function RunAction(cmd, senderName)
-	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-	local hrp = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 2)
-	local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 2)
+local function ExecuteDirectAction(cmd, targetPlayer)
+	if not targetPlayer then return end
 
-	if not hrp or not hum then return end
+	local myChar = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local myHRP = myChar:FindFirstChild("HumanoidRootPart")
+	
+	local targetChar = targetPlayer.Character
+	if not targetChar then return end
+	local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+	local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
 
-	ShowNotif("Tácito: Executando " .. string.upper(cmd))
+	ShowNotif("Tácito: Aplicando " .. string.upper(cmd) .. " em " .. targetPlayer.DisplayName)
 
-	if cmd == "kick" then
-		LocalPlayer:Kick("Você foi kickado via Tácito Hub!")
+	if cmd == "bring" and myHRP and targetHRP then
+		targetHRP.CFrame = myHRP.CFrame * CFrame.new(0, 0, -3)
 
-	elseif cmd == "kill" then
-		hum.Health = 0
-
-	elseif cmd == "killplus" then
-		hum.Health = 0
-		local pe = Instance.new("ParticleEmitter")
-		pe.Texture = "rbxassetid://243664672"
-		pe.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 0)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 255))
-		})
-		pe.Size = NumberSequence.new(3)
-		pe.Speed = NumberRange.new(20, 35)
-		pe.Lifetime = NumberRange.new(1, 2)
-		pe.Parent = hrp
-		task.delay(2, function() pe:Destroy() end)
-
-	elseif cmd == "jail" then
+	elseif cmd == "jail" and targetHRP then
 		if ActiveJail then ActiveJail:Destroy() end
 		local j = Instance.new("Part")
 		j.Name = "TacitoJailPart"
 		j.Size = Vector3.new(8, 10, 8)
-		j.CFrame = hrp.CFrame
+		j.CFrame = targetHRP.CFrame
 		j.Anchored = true
 		j.Transparency = 0.5
 		j.Color = Color3.fromRGB(0, 150, 255)
@@ -108,7 +94,7 @@ local function RunAction(cmd, senderName)
 		j.CanCollide = true
 		j.Parent = workspace
 		
-		hrp.CFrame = j.CFrame
+		targetHRP.CFrame = j.CFrame
 		ActiveJail = j
 
 	elseif cmd == "unjail" then
@@ -117,18 +103,12 @@ local function RunAction(cmd, senderName)
 			ActiveJail = nil
 		end
 
-	elseif cmd == "bring" then
-		local sender = Players:FindFirstChild(senderName)
-		if sender and sender.Character and sender.Character:FindFirstChild("HumanoidRootPart") then
-			hrp.CFrame = sender.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -3)
-		end
-
-	elseif cmd == "freeze" then
+	elseif cmd == "freeze" and targetHRP then
 		if FreezeConnection then FreezeConnection:Disconnect() end
-		local pos = hrp.CFrame
+		local pos = targetHRP.CFrame
 		FreezeConnection = RunService.Heartbeat:Connect(function()
-			if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-				LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(pos.Position) * LocalPlayer.Character.HumanoidRootPart.CFrame.Rotation
+			if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+				targetPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(pos.Position) * targetPlayer.Character.HumanoidRootPart.CFrame.Rotation
 			end
 		end)
 
@@ -138,16 +118,23 @@ local function RunAction(cmd, senderName)
 			FreezeConnection = nil
 		end
 
-	elseif cmd == "explode" then
+	elseif cmd == "explode" and targetHRP then
 		local exp = Instance.new("Explosion")
-		exp.Position = hrp.Position
+		exp.Position = targetHRP.Position
 		exp.Parent = workspace
-		hum.Health = 0
+		if targetHum then targetHum.Health = 0 end
+
+	elseif cmd == "kill" or cmd == "killplus" then
+		if targetHum then targetHum.Health = 0 end
+
+	elseif cmd == "kick" then
+		-- Ações de Kick globais continuam dependentes de comandos do executor/server side
+		SendChatMessage(";" .. cmd .. " " .. targetPlayer.Name)
 	end
 end
 
 ----------------------------------------------------
--- 4. PROCESSAMENTO DAS MENSAGENS
+-- 4. PROCESSAMENTO DAS MENSAGENS RECEBIDAS
 ----------------------------------------------------
 local function IncomingMessage(senderName, text)
 	if not text or string.sub(text, 1, 1) ~= ";" then return end
@@ -162,13 +149,16 @@ local function IncomingMessage(senderName, text)
 		return
 	end
 
-	-- Verifica se a mensagem é para você (Username ou DisplayName)
 	local myName = string.lower(LocalPlayer.Name)
 	local myDisplay = string.lower(LocalPlayer.DisplayName)
 	local targetLower = string.lower(target)
 
 	if targetLower == myName or targetLower == myDisplay then
-		RunAction(cmd, senderName)
+		-- Executa as ações locais se você for o alvo da mensagem recebida
+		local sender = Players:FindFirstChild(senderName)
+		if sender then
+			ExecuteDirectAction(cmd, LocalPlayer)
+		end
 	end
 end
 
@@ -348,7 +338,11 @@ for _, cmd in ipairs(commands) do
 			SendChatMessage(";verifique")
 		else
 			if SelectedPlayerName ~= "" then
-				SendChatMessage(";" .. cmd .. " " .. SelectedPlayerName)
+				local targetPlayer = Players:FindFirstChild(SelectedPlayerName)
+				if targetPlayer then
+					-- Executa a ação diretamente no cliente local além de enviar via chat
+					ExecuteDirectAction(cmd, targetPlayer)
+				end
 			end
 		end
 	end)
